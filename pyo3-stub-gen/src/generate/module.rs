@@ -20,7 +20,7 @@ pub struct Module {
 }
 
 impl Import for Module {
-    fn import(&self) -> HashSet<ModuleRef> {
+    fn import(&self) -> HashSet<ImportRef> {
         let mut imports = HashSet::new();
         for class in self.class.values() {
             imports.extend(class.import());
@@ -40,14 +40,43 @@ impl fmt::Display for Module {
         let mut imports = self.import();
         let any_overloaded = self.function.values().any(|functions| functions.len() > 1);
         if any_overloaded {
-            imports.insert(ModuleRef::Named("typing".to_string()));
+            imports.insert(ImportRef::Module("typing".into()));
         }
 
-        for import in imports.into_iter().sorted() {
-            let name = import.get().unwrap_or(&self.default_module_name);
-            if name != self.name {
-                writeln!(f, "import {name}")?;
+        let package_name = self.default_module_name.split('.').next().unwrap();
+        let mut type_ref_grouped: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for common_ref in imports.into_iter().sorted() {
+            match common_ref {
+                ImportRef::Module(module_ref) => {
+                    let name = module_ref.get().unwrap_or(&self.default_module_name);
+                    if name != self.name {
+                        writeln!(f, "import {name}")?;
+                    }
+                }
+                ImportRef::Type(type_ref) => {
+                    let module_name = type_ref.module.get().unwrap_or(&self.default_module_name);
+                    if module_name != self.name {
+                        if module_name.starts_with(package_name) {
+                            type_ref_grouped
+                                .entry(module_name.to_string())
+                                .or_default()
+                                .push(type_ref.name);
+                        } else {
+                            writeln!(f, "import {}", module_name)?;
+                        }
+                    }
+                }
             }
+        }
+        for (module_name, type_names) in type_ref_grouped {
+            let mut sorted_type_names = type_names.clone();
+            sorted_type_names.sort();
+            writeln!(
+                f,
+                "from {} import {}",
+                module_name,
+                sorted_type_names.join(", ")
+            )?;
         }
         for submod in &self.submodules {
             writeln!(f, "from . import {submod}")?;
